@@ -1,7 +1,13 @@
 import { useEffect, useState } from 'react'
 import api from '../servicios/api'
+import { useAuth } from '../contexto/AuthContext'
 
 function Pacientes() {
+    const { roles } = useAuth()
+
+    const puedeCambiarEstado =
+        roles.includes('Administrador') ||
+        roles.includes('Recepcion')
 
     const [pacientes, setPacientes] = useState([])
     const [cargando, setCargando] = useState(true)
@@ -22,12 +28,25 @@ function Pacientes() {
     const [errorRegistro, setErrorRegistro] = useState('')
     const [pacienteEditando, setPacienteEditando] = useState(null)
 
+    const limpiarFormulario = () => {
+        setFormulario({
+            nombres: '',
+            apellidos: '',
+            documentoIdentidad: '',
+            fechaNacimiento: '',
+            sexo: '',
+            telefono: '',
+            correo: '',
+            direccion: ''
+        })
+    }
+
     const manejarCambio = (e) => {
-    const { name, value } = e.target
+        const { name, value } = e.target
 
         setFormulario({
-                ...formulario,
-                [name]: value
+            ...formulario,
+            [name]: value
         })
     }
 
@@ -75,24 +94,16 @@ function Pacientes() {
 
             setMensaje(respuesta.data.mensaje)
 
-            const respuestaPacientes = await api.get('/pacientes')
+            const respuestaPacientes =
+                await api.get('/pacientes')
+
             setPacientes(respuestaPacientes.data)
-
             setPacienteEditando(null)
-
-            setFormulario({
-                nombres: '',
-                apellidos: '',
-                documentoIdentidad: '',
-                fechaNacimiento: '',
-                sexo: '',
-                telefono: '',
-                correo: '',
-                direccion: ''
-            })
+            limpiarFormulario()
         } catch (error) {
             setErrorRegistro(
                 error.response?.data?.mensaje ||
+                error.response?.data ||
                 'No fue posible actualizar el paciente.'
             )
         }
@@ -118,22 +129,15 @@ function Pacientes() {
 
             setMensaje(respuesta.data.mensaje)
 
-            const respuestaPacientes = await api.get('/pacientes')
-            setPacientes(respuestaPacientes.data)
+            const respuestaPacientes =
+                await api.get('/pacientes')
 
-            setFormulario({
-                nombres: '',
-                apellidos: '',
-                documentoIdentidad: '',
-                fechaNacimiento: '',
-                sexo: '',
-                telefono: '',
-                correo: '',
-                direccion: ''
-            })
+            setPacientes(respuestaPacientes.data)
+            limpiarFormulario()
         } catch (error) {
             setErrorRegistro(
                 error.response?.data?.mensaje ||
+                error.response?.data ||
                 'No fue posible registrar el paciente.'
             )
         }
@@ -150,11 +154,14 @@ function Pacientes() {
 
             setMensaje(respuesta.data.mensaje)
 
-            const respuestaPacientes = await api.get('/pacientes')
+            const respuestaPacientes =
+                await api.get('/pacientes')
+
             setPacientes(respuestaPacientes.data)
         } catch (error) {
             setErrorRegistro(
                 error.response?.data?.mensaje ||
+                error.response?.data ||
                 'No fue posible desactivar el paciente.'
             )
         }
@@ -171,11 +178,14 @@ function Pacientes() {
 
             setMensaje(respuesta.data.mensaje)
 
-            const respuestaPacientes = await api.get('/pacientes')
+            const respuestaPacientes =
+                await api.get('/pacientes')
+
             setPacientes(respuestaPacientes.data)
         } catch (error) {
             setErrorRegistro(
                 error.response?.data?.mensaje ||
+                error.response?.data ||
                 'No fue posible reactivar el paciente.'
             )
         }
@@ -184,10 +194,14 @@ function Pacientes() {
     useEffect(() => {
         const obtenerPacientes = async () => {
             try {
-                const respuesta = await api.get('/pacientes')
+                const respuesta =
+                    await api.get('/pacientes')
+
                 setPacientes(respuesta.data)
-            } catch (error) {
-                setError('No fue posible obtener los pacientes.')
+            } catch {
+                setError(
+                    'No fue posible obtener los pacientes.'
+                )
             } finally {
                 setCargando(false)
             }
@@ -199,6 +213,7 @@ function Pacientes() {
     return (
         <div>
             <h2>Pacientes</h2>
+
             <p className="text-muted">
                 Gestión de pacientes registrados.
             </p>
@@ -206,10 +221,18 @@ function Pacientes() {
             <div className="card mb-4">
                 <div className="card-body">
                     <h5 className="card-title mb-3">
-                        Registrar paciente
+                        {pacienteEditando
+                            ? 'Editar paciente'
+                            : 'Registrar paciente'}
                     </h5>
 
-                    <form onSubmit={pacienteEditando ? actualizarPaciente : registrarPaciente}>
+                    <form
+                        onSubmit={
+                            pacienteEditando
+                                ? actualizarPaciente
+                                : registrarPaciente
+                        }
+                    >
                         <div className="row">
                             <div className="col-md-6 mb-3">
                                 <label className="form-label">
@@ -222,6 +245,7 @@ function Pacientes() {
                                     name="nombres"
                                     value={formulario.nombres}
                                     onChange={manejarCambio}
+                                    maxLength="100"
                                     required
                                 />
                             </div>
@@ -237,10 +261,12 @@ function Pacientes() {
                                     name="apellidos"
                                     value={formulario.apellidos}
                                     onChange={manejarCambio}
+                                    maxLength="100"
                                     required
                                 />
                             </div>
                         </div>
+
                         <div className="row">
                             <div className="col-md-6 mb-3">
                                 <label className="form-label">
@@ -253,6 +279,7 @@ function Pacientes() {
                                     name="documentoIdentidad"
                                     value={formulario.documentoIdentidad}
                                     onChange={manejarCambio}
+                                    maxLength="50"
                                 />
                             </div>
 
@@ -267,9 +294,15 @@ function Pacientes() {
                                     name="fechaNacimiento"
                                     value={formulario.fechaNacimiento}
                                     onChange={manejarCambio}
+                                    max={
+                                        new Date()
+                                            .toISOString()
+                                            .split('T')[0]
+                                    }
                                 />
                             </div>
                         </div>
+
                         <div className="row">
                             <div className="col-md-6 mb-3">
                                 <label className="form-label">
@@ -282,10 +315,18 @@ function Pacientes() {
                                     value={formulario.sexo}
                                     onChange={manejarCambio}
                                 >
-                                    <option value="">Seleccione</option>
-                                    <option value="Masculino">Masculino</option>
-                                    <option value="Femenino">Femenino</option>
-                                    <option value="Otro">Otro</option>
+                                    <option value="">
+                                        Seleccione
+                                    </option>
+                                    <option value="Masculino">
+                                        Masculino
+                                    </option>
+                                    <option value="Femenino">
+                                        Femenino
+                                    </option>
+                                    <option value="Otro">
+                                        Otro
+                                    </option>
                                 </select>
                             </div>
 
@@ -300,9 +341,11 @@ function Pacientes() {
                                     name="telefono"
                                     value={formulario.telefono}
                                     onChange={manejarCambio}
+                                    maxLength="30"
                                 />
                             </div>
                         </div>
+
                         <div className="row">
                             <div className="col-md-6 mb-3">
                                 <label className="form-label">
@@ -315,6 +358,7 @@ function Pacientes() {
                                     name="correo"
                                     value={formulario.correo}
                                     onChange={manejarCambio}
+                                    maxLength="150"
                                 />
                             </div>
 
@@ -329,23 +373,31 @@ function Pacientes() {
                                     name="direccion"
                                     value={formulario.direccion}
                                     onChange={manejarCambio}
+                                    maxLength="250"
                                 />
                             </div>
                         </div>
+
                         <div className="d-flex justify-content-end">
                             <button
                                 type="submit"
                                 className="btn btn-primary"
                             >
-                                <i className={`bi ${pacienteEditando ? 'bi-check-circle'
-                                    : 'bi-person-plus'} me-2`}
+                                <i
+                                    className={`bi ${
+                                        pacienteEditando
+                                            ? 'bi-check-circle'
+                                            : 'bi-person-plus'
+                                    } me-2`}
                                 ></i>
+
                                 {pacienteEditando
                                     ? 'Guardar cambios'
                                     : 'Registrar paciente'}
                             </button>
                         </div>
                     </form>
+
                     {mensaje && (
                         <div className="alert alert-success mt-3">
                             {mensaje}
@@ -386,7 +438,9 @@ function Pacientes() {
                                         <th>ID</th>
                                         <th>Paciente</th>
                                         <th>Documento</th>
-                                        <th>Fecha de nacimiento</th>
+                                        <th>
+                                            Fecha de nacimiento
+                                        </th>
                                         <th>Sexo</th>
                                         <th>Teléfono</th>
                                         <th>Correo</th>
@@ -396,74 +450,129 @@ function Pacientes() {
                                 </thead>
 
                                 <tbody>
-                                    {pacientes.map((paciente) => (
-                                        <tr key={paciente.idPaciente}>
-                                            <td>{paciente.idPaciente}</td>
+                                    {pacientes.map(
+                                        (paciente) => (
+                                            <tr
+                                                key={
+                                                    paciente.idPaciente
+                                                }
+                                            >
+                                                <td>
+                                                    {
+                                                        paciente.idPaciente
+                                                    }
+                                                </td>
 
-                                            <td>
-                                                {paciente.nombres}{' '}
-                                                {paciente.apellidos}
-                                            </td>
+                                                <td>
+                                                    {
+                                                        paciente.nombres
+                                                    }{' '}
+                                                    {
+                                                        paciente.apellidos
+                                                    }
+                                                </td>
 
-                                            <td>
-                                                {paciente.documentoIdentidad || '-'}
-                                            </td>
+                                                <td>
+                                                    {
+                                                        paciente.documentoIdentidad ||
+                                                        '-'
+                                                    }
+                                                </td>
 
-                                            <td>
-                                                {paciente.fechaNacimiento
-                                                    ? new Date(
-                                                        paciente.fechaNacimiento
-                                                    ).toLocaleDateString()
-                                                    : '-'}
-                                            </td>
+                                                <td>
+                                                    {paciente.fechaNacimiento
+                                                        ? new Date(
+                                                              paciente.fechaNacimiento
+                                                          ).toLocaleDateString()
+                                                        : '-'}
+                                                </td>
 
-                                            <td>{paciente.sexo || '-'}</td>
+                                                <td>
+                                                    {paciente.sexo ||
+                                                        '-'}
+                                                </td>
 
-                                            <td>{paciente.telefono || '-'}</td>
+                                                <td>
+                                                    {paciente.telefono ||
+                                                        '-'}
+                                                </td>
 
-                                            <td>{paciente.correo || '-'}</td>
+                                                <td>
+                                                    {paciente.correo ||
+                                                        '-'}
+                                                </td>
 
-                                            <td>
-                                                {paciente.activo
-                                                    ? 'Activo'
-                                                    : 'Inactivo'}
-                                            </td>
-
-                                            <td>
-                                                <button
-                                                    type="button"
-                                                    className="btn btn-outline-primary btn-sm me-2"
-                                                    onClick={() => iniciarEdicion(paciente)}
-                                                >
-                                                    <i className="bi bi-pencil me-1"></i>
-                                                    Editar
-                                                </button>
-                                                {paciente.activo ? (
-                                                    <button
-                                                        type="button"
-                                                        className="btn btn-outline-danger btn-sm"
-                                                        onClick={() =>
-                                                            desactivarPaciente(paciente.idPaciente)
+                                                <td>
+                                                    <span
+                                                        className={
+                                                            paciente.activo
+                                                                ? 'badge bg-success'
+                                                                : 'badge bg-secondary'
                                                         }
                                                     >
-                                                        <i className="bi bi-person-x me-1"></i>
-                                                        Desactivar
-                                                    </button>
-                                                ) : (
+                                                        {paciente.activo
+                                                            ? 'Activo'
+                                                            : 'Inactivo'}
+                                                    </span>
+                                                </td>
+
+                                                <td>
                                                     <button
                                                         type="button"
-                                                        className="btn btn-outline-success btn-sm"
+                                                        className="btn btn-outline-primary btn-sm me-2"
                                                         onClick={() =>
-                                                            reactivarPaciente(paciente.idPaciente)
+                                                            iniciarEdicion(
+                                                                paciente
+                                                            )
                                                         }
                                                     >
-                                                        <i className="bi bi-person-check me-1"></i>
-                                                        Reactivar
+                                                        <i className="bi bi-pencil me-1"></i>
+                                                        Editar
                                                     </button>
-                                                )}
+
+                                                    {puedeCambiarEstado &&
+                                                        (paciente.activo ? (
+                                                            <button
+                                                                type="button"
+                                                                className="btn btn-outline-danger btn-sm"
+                                                                onClick={() =>
+                                                                    desactivarPaciente(
+                                                                        paciente.idPaciente
+                                                                    )
+                                                                }
+                                                            >
+                                                                <i className="bi bi-person-x me-1"></i>
+                                                                Desactivar
+                                                            </button>
+                                                        ) : (
+                                                            <button
+                                                                type="button"
+                                                                className="btn btn-outline-success btn-sm"
+                                                                onClick={() =>
+                                                                    reactivarPaciente(
+                                                                        paciente.idPaciente
+                                                                    )
+                                                                }
+                                                            >
+                                                                <i className="bi bi-person-check me-1"></i>
+                                                                Reactivar
+                                                            </button>
+                                                        ))}
+                                                </td>
+                                            </tr>
+                                        )
+                                    )}
+
+                                    {pacientes.length === 0 && (
+                                        <tr>
+                                            <td
+                                                colSpan="9"
+                                                className="text-center text-muted"
+                                            >
+                                                No hay pacientes registrados.
                                             </td>
                                         </tr>
-                                    ))}
+                                    )}
                                 </tbody>
                             </table>
                         </div>

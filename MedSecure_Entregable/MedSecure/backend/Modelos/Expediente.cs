@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace MedSecure.Modelos
 {
     public class Expediente
@@ -8,6 +10,7 @@ namespace MedSecure.Modelos
 
         public DateTime FechaCreacion { get; set; }
 
+        [MaxLength(1000)]
         public string? ObservacionesGenerales { get; set; }
     }
 }

@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import api from '../servicios/api'
 
 function Expedientes() {
-
     const [expedientes, setExpedientes] = useState([])
     const [pacientes, setPacientes] = useState([])
     const [cargando, setCargando] = useState(true)
@@ -17,26 +16,53 @@ function Expedientes() {
     const [mensaje, setMensaje] = useState('')
     const [errorRegistro, setErrorRegistro] = useState('')
 
-    useEffect(() => {
-        const obtenerExpedientes = async () => {
-            try {
-                const [respuestaExpedientes, respuestaPacientes] = await Promise.all([
-                    api.get('/expedientes'),
-                    api.get('/pacientes')
-                ])
+    const obtenerMensajeError = (
+        error,
+        mensajePredeterminado
+    ) => {
+        const datos = error.response?.data
 
-                setExpedientes(respuestaExpedientes.data)
-                setPacientes(
-                    respuestaPacientes.data.filter(paciente => paciente.activo)
+        if (typeof datos === 'string') {
+            return datos
+        }
+
+        if (datos?.mensaje) {
+            return datos.mensaje
+        }
+
+        return mensajePredeterminado
+    }
+
+    const cargarDatos = async () => {
+        const [respuestaExpedientes, respuestaPacientes] =
+            await Promise.all([
+                api.get('/expedientes'),
+                api.get('/pacientes')
+            ])
+
+        setExpedientes(respuestaExpedientes.data)
+
+        setPacientes(
+            respuestaPacientes.data.filter(
+                paciente => paciente.activo
+            )
+        )
+    }
+
+    useEffect(() => {
+        const obtenerDatos = async () => {
+            try {
+                await cargarDatos()
+            } catch {
+                setError(
+                    'No fue posible obtener los expedientes.'
                 )
-            } catch (error) {
-                setError('No fue posible obtener los expedientes.')
             } finally {
                 setCargando(false)
             }
         }
 
-        obtenerExpedientes()
+        obtenerDatos()
     }, [])
 
     const manejarCambio = (e) => {
@@ -46,6 +72,15 @@ function Expedientes() {
             ...formulario,
             [name]: value
         })
+    }
+
+    const limpiarFormulario = () => {
+        setFormulario({
+            idPaciente: '',
+            observacionesGenerales: ''
+        })
+
+        setExpedienteEditando(null)
     }
 
     const iniciarEdicion = (expediente) => {
@@ -61,34 +96,56 @@ function Expedientes() {
         setErrorRegistro('')
     }
 
+    const cancelarEdicion = () => {
+        limpiarFormulario()
+        setMensaje('')
+        setErrorRegistro('')
+    }
+
     const registrarExpediente = async (e) => {
         e.preventDefault()
 
         setMensaje('')
         setErrorRegistro('')
 
+        if (!formulario.idPaciente) {
+            setErrorRegistro(
+                'Debe seleccionar un paciente.'
+            )
+            return
+        }
+
         try {
-            await api.post('/expedientes', {
-                idPaciente: Number(formulario.idPaciente),
-                observacionesGenerales:
-                    formulario.observacionesGenerales.trim() === ''
-                        ? null
-                        : formulario.observacionesGenerales
-            })
+            const respuesta = await api.post(
+                '/expedientes',
+                {
+                    idPaciente: Number(
+                        formulario.idPaciente
+                    ),
+                    observacionesGenerales:
+                        formulario.observacionesGenerales
+                            .trim() === ''
+                            ? null
+                            : formulario
+                                .observacionesGenerales
+                                .trim()
+                }
+            )
 
-            const respuesta = await api.get('/expedientes')
-            setExpedientes(respuesta.data)
+            await cargarDatos()
 
-            setFormulario({
-                idPaciente: '',
-                observacionesGenerales: ''
-            })
+            limpiarFormulario()
 
-            setMensaje('Expediente creado correctamente.')
+            setMensaje(
+                respuesta.data?.mensaje ||
+                'Expediente creado correctamente.'
+            )
         } catch (error) {
             setErrorRegistro(
-                error.response?.data ||
-                'No fue posible crear el expediente.'
+                obtenerMensajeError(
+                    error,
+                    'No fue posible crear el expediente.'
+                )
             )
         }
     }
@@ -96,53 +153,89 @@ function Expedientes() {
     const actualizarExpediente = async (e) => {
         e.preventDefault()
 
+        if (!expedienteEditando) {
+            return
+        }
+
         setMensaje('')
         setErrorRegistro('')
 
         try {
-            await api.put(
+            const respuesta = await api.put(
                 `/expedientes/${expedienteEditando.idExpediente}`,
                 {
                     observacionesGenerales:
-                        formulario.observacionesGenerales.trim() === ''
+                        formulario.observacionesGenerales
+                            .trim() === ''
                             ? null
-                            : formulario.observacionesGenerales
+                            : formulario
+                                .observacionesGenerales
+                                .trim()
                 }
             )
 
-            const respuesta = await api.get('/expedientes')
-            setExpedientes(respuesta.data)
+            await cargarDatos()
 
-            setExpedienteEditando(null)
+            limpiarFormulario()
 
-            setFormulario({
-                idPaciente: '',
-                observacionesGenerales: ''
-            })
-
-            setMensaje('Expediente actualizado correctamente.')
+            setMensaje(
+                respuesta.data?.mensaje ||
+                'Expediente actualizado correctamente.'
+            )
         } catch (error) {
             setErrorRegistro(
-                typeof error.response?.data === 'string'
-                    ? error.response.data
-                    : 'No fue posible actualizar el expediente.'
+                obtenerMensajeError(
+                    error,
+                    'No fue posible actualizar el expediente.'
+                )
             )
         }
     }
 
+    const idsPacientesConExpediente = new Set(
+        expedientes.map(
+            expediente => expediente.idPaciente
+        )
+    )
+
+    const pacientesDisponibles = pacientes.filter(
+        paciente =>
+            !idsPacientesConExpediente.has(
+                paciente.idPaciente
+            )
+    )
+
+    const pacientesSelector = expedienteEditando
+        ? pacientes.filter(
+            paciente =>
+                paciente.idPaciente ===
+                expedienteEditando.idPaciente
+        )
+        : pacientesDisponibles
+
     return (
         <div>
             <h2>Expedientes médicos</h2>
+
             <p className="text-muted">
                 Gestión de expedientes médicos.
             </p>
+
             <div className="card mb-4">
                 <div className="card-body">
                     <h5 className="card-title mb-3">
-                        Crear expediente
+                        {expedienteEditando
+                            ? 'Editar expediente'
+                            : 'Crear expediente'}
                     </h5>
 
-                    <form onSubmit={expedienteEditando? actualizarExpediente: registrarExpediente}>
+                    <form
+                        onSubmit={
+                            expedienteEditando
+                                ? actualizarExpediente
+                                : registrarExpediente
+                        }
+                    >
                         <div className="mb-3">
                             <label className="form-label">
                                 Paciente
@@ -154,21 +247,37 @@ function Expedientes() {
                                 value={formulario.idPaciente}
                                 onChange={manejarCambio}
                                 required
-                                disabled={expedienteEditando !== null}
+                                disabled={
+                                    expedienteEditando !== null
+                                }
                             >
                                 <option value="">
                                     Seleccione un paciente
                                 </option>
 
-                                {pacientes.map((paciente) => (
-                                    <option
-                                        key={paciente.idPaciente}
-                                        value={paciente.idPaciente}
-                                    >
-                                        {paciente.nombres} {paciente.apellidos}
-                                    </option>
-                                ))}
+                                {pacientesSelector.map(
+                                    paciente => (
+                                        <option
+                                            key={
+                                                paciente.idPaciente
+                                            }
+                                            value={
+                                                paciente.idPaciente
+                                            }
+                                        >
+                                            {paciente.nombres}{' '}
+                                            {paciente.apellidos}
+                                        </option>
+                                    )
+                                )}
                             </select>
+
+                            {!expedienteEditando &&
+                                pacientesDisponibles.length === 0 && (
+                                    <div className="form-text">
+                                        No hay pacientes activos sin expediente.
+                                    </div>
+                                )}
                         </div>
 
                         <div className="mb-3">
@@ -179,21 +288,48 @@ function Expedientes() {
                             <textarea
                                 className="form-control"
                                 name="observacionesGenerales"
-                                value={formulario.observacionesGenerales}
+                                value={
+                                    formulario.observacionesGenerales
+                                }
                                 onChange={manejarCambio}
                                 rows="3"
+                                maxLength="1000"
                                 placeholder="Ingrese observaciones generales"
                             />
+
+                            <div className="form-text text-end">
+                                {
+                                    formulario
+                                        .observacionesGenerales
+                                        .length
+                                }/1000
+                            </div>
                         </div>
 
-                        <button
-                            type="submit"
-                            className="btn btn-primary"
-                        >
-                            {expedienteEditando
-                                ? 'Guardar cambios'
-                                : 'Crear expediente'}
-                        </button>
+                        <div className="d-flex gap-2">
+                            <button
+                                type="submit"
+                                className="btn btn-primary"
+                                disabled={
+                                    !expedienteEditando &&
+                                    pacientesDisponibles.length === 0
+                                }
+                            >
+                                {expedienteEditando
+                                    ? 'Guardar cambios'
+                                    : 'Crear expediente'}
+                            </button>
+
+                            {expedienteEditando && (
+                                <button
+                                    type="button"
+                                    className="btn btn-secondary"
+                                    onClick={cancelarEdicion}
+                                >
+                                    Cancelar
+                                </button>
+                            )}
+                        </div>
                     </form>
 
                     {mensaje && (
@@ -204,9 +340,7 @@ function Expedientes() {
 
                     {errorRegistro && (
                         <div className="alert alert-danger mt-3 mb-0">
-                            {typeof errorRegistro === 'string'
-                                ? errorRegistro
-                                : 'No fue posible crear el expediente.'}
+                            {errorRegistro}
                         </div>
                     )}
                 </div>
@@ -237,8 +371,12 @@ function Expedientes() {
                                     <tr>
                                         <th>ID</th>
                                         <th>Paciente</th>
-                                        <th>Fecha de creación</th>
-                                        <th>Observaciones generales</th>
+                                        <th>
+                                            Fecha de creación
+                                        </th>
+                                        <th>
+                                            Observaciones generales
+                                        </th>
                                         <th>Acciones</th>
                                     </tr>
                                 </thead>
@@ -254,36 +392,55 @@ function Expedientes() {
                                             </td>
                                         </tr>
                                     ) : (
-                                        expedientes.map((expediente) => (
-                                            <tr key={expediente.idExpediente}>
-                                                <td>
-                                                    {expediente.idExpediente}
-                                                </td>
+                                        expedientes.map(
+                                            expediente => (
+                                                <tr
+                                                    key={
+                                                        expediente.idExpediente
+                                                    }
+                                                >
+                                                    <td>
+                                                        {
+                                                            expediente.idExpediente
+                                                        }
+                                                    </td>
 
-                                                <td>
-                                                    {expediente.nombrePaciente || 'Sin información'}
-                                                </td>
+                                                    <td>
+                                                        {expediente.nombrePaciente ||
+                                                            'Sin información'}
+                                                    </td>
 
-                                                <td>
-                                                    {new Date(
-                                                        expediente.fechaCreacion
-                                                    ).toLocaleString()}
-                                                </td>
+                                                    <td>
+                                                        {new Date(
+                                                            expediente.fechaCreacion
+                                                        ).toLocaleString()}
+                                                    </td>
 
-                                                <td>
-                                                    {expediente.observacionesGenerales || 'Sin observaciones'}
-                                                </td>
-                                                <td>
-                                                    <button
-                                                        type="button"
-                                                        className="btn btn-sm btn-warning"
-                                                        onClick={() => iniciarEdicion(expediente)}
-                                                    >
-                                                        Editar
-                                                    </button>
-                                                </td>
-                                            </tr>
-                                        ))
+                                                    <td>
+                                                        {expediente.observacionesGenerales ||
+                                                            'Sin observaciones'}
+                                                    </td>
+
+                                                    <td>
+                                                        <button
+                                                            type="button"
+                                                            className="btn btn-sm btn-warning"
+                                                            onClick={() =>
+                                                                iniciarEdicion(
+                                                                    expediente
+                                                                )
+                                                            }
+                                                            disabled={
+                                                                expediente.pacienteActivo ===
+                                                                false
+                                                            }
+                                                        >
+                                                            Editar
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            )
+                                        )
                                     )}
                                 </tbody>
                             </table>

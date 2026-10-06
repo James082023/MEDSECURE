@@ -12,14 +12,17 @@ namespace MedSecure.Controladores
     {
         private readonly ContextoBaseDatos _contexto;
 
-        public ControladorAuditoriaController(ContextoBaseDatos contexto)
+        public ControladorAuditoriaController(
+            ContextoBaseDatos contexto)
         {
             _contexto = contexto;
         }
-       [HttpGet]
+
+        [HttpGet]
         public async Task<IActionResult> ObtenerAuditoria()
         {
             var registros = await _contexto.Auditorias
+                .AsNoTracking()
                 .OrderByDescending(a => a.FechaHora)
                 .Select(a => new
                 {
@@ -28,7 +31,9 @@ namespace MedSecure.Controladores
 
                     NombreUsuario = a.IdUsuario.HasValue
                         ? _contexto.Usuarios
-                            .Where(u => u.IdUsuario == a.IdUsuario.Value)
+                            .Where(u =>
+                                u.IdUsuario ==
+                                a.IdUsuario.Value)
                             .Select(u => u.NombreUsuario)
                             .FirstOrDefault()
                         : null,

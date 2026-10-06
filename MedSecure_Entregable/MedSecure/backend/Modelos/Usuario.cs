@@ -12,9 +12,10 @@ namespace MedSecure.Modelos
 
         public bool Activo { get; set; }
 
+        public bool DebeCambiarClave { get; set; }
+
         public int VersionToken { get; set; } = 1;
 
         public DateTime FechaCreacion { get; set; }
-        
     }
 }

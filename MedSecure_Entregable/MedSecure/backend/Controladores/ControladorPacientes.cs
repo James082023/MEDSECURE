@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using MedSecure.Datos;
 using MedSecure.DTO;
@@ -35,10 +36,19 @@ namespace MedSecure.Controladores
             return null;
         }
 
+        private static bool EsErrorDuplicado(DbUpdateException excepcion)
+        {
+            return excepcion.InnerException is SqlException sqlException &&
+                   (sqlException.Number == 2601 ||
+                    sqlException.Number == 2627);
+        }
+
         [HttpGet]
+        [Authorize(Roles = "Administrador,Medico,Recepcion")]
         public async Task<IActionResult> ObtenerPacientes()
         {
             var pacientes = await _contexto.Pacientes
+                .AsNoTracking()
                 .OrderByDescending(p => p.IdPaciente)
                 .Select(p => new
                 {
@@ -58,41 +68,125 @@ namespace MedSecure.Controladores
 
             return Ok(pacientes);
         }
+
         [HttpPost]
+        [Authorize(Roles = "Administrador,Medico,Recepcion")]
         public async Task<IActionResult> RegistrarPaciente(
             [FromBody] SolicitudRegistroPaciente solicitud)
         {
+            var nombres = solicitud.Nombres.Trim();
+            var apellidos = solicitud.Apellidos.Trim();
+
+            if (string.IsNullOrWhiteSpace(nombres))
+            {
+                return BadRequest(new
+                {
+                    mensaje = "Los nombres del paciente son obligatorios."
+                });
+            }
+
+            if (string.IsNullOrWhiteSpace(apellidos))
+            {
+                return BadRequest(new
+                {
+                    mensaje = "Los apellidos del paciente son obligatorios."
+                });
+            }
+
+            if (solicitud.FechaNacimiento.HasValue &&
+                solicitud.FechaNacimiento.Value.Date > DateTime.UtcNow.Date)
+            {
+                return BadRequest(new
+                {
+                    mensaje = "La fecha de nacimiento no puede ser futura."
+                });
+            }
+
+            var documentoIdentidad =
+                string.IsNullOrWhiteSpace(solicitud.DocumentoIdentidad)
+                    ? null
+                    : solicitud.DocumentoIdentidad.Trim();
+
+            if (documentoIdentidad != null)
+            {
+                var documentoDuplicado = await _contexto.Pacientes
+                    .AsNoTracking()
+                    .AnyAsync(p =>
+                        p.DocumentoIdentidad == documentoIdentidad);
+
+                if (documentoDuplicado)
+                {
+                    return Conflict(new
+                    {
+                        mensaje =
+                            "Ya existe un paciente registrado con ese documento de identidad."
+                    });
+                }
+            }
+
             var paciente = new Paciente
             {
-                Nombres = solicitud.Nombres.Trim(),
-                Apellidos = solicitud.Apellidos.Trim(),
-                DocumentoIdentidad = solicitud.DocumentoIdentidad?.Trim(),
+                Nombres = nombres,
+                Apellidos = apellidos,
+                DocumentoIdentidad = documentoIdentidad,
                 FechaNacimiento = solicitud.FechaNacimiento,
-                Sexo = solicitud.Sexo?.Trim(),
-                Telefono = solicitud.Telefono?.Trim(),
-                Correo = solicitud.Correo?.Trim(),
-                Direccion = solicitud.Direccion?.Trim(),
+                Sexo = string.IsNullOrWhiteSpace(solicitud.Sexo)
+                    ? null
+                    : solicitud.Sexo.Trim(),
+                Telefono = string.IsNullOrWhiteSpace(solicitud.Telefono)
+                    ? null
+                    : solicitud.Telefono.Trim(),
+                Correo = string.IsNullOrWhiteSpace(solicitud.Correo)
+                    ? null
+                    : solicitud.Correo.Trim(),
+                Direccion = string.IsNullOrWhiteSpace(solicitud.Direccion)
+                    ? null
+                    : solicitud.Direccion.Trim(),
                 FechaRegistro = DateTime.UtcNow,
                 Activo = true
             };
 
-            _contexto.Pacientes.Add(paciente);
-            await _contexto.SaveChangesAsync();
+            await using var transaccion =
+                await _contexto.Database.BeginTransactionAsync();
 
-            var auditoria = new Auditoria
+            try
             {
-                IdUsuario = ObtenerIdUsuarioActual(),
-                Accion = "CREAR_PACIENTE",
-                Modulo = "Pacientes",
-                Detalles =
-                    $"Paciente registrado. IdPaciente: {paciente.IdPaciente}",
-                DireccionIP =
-                    HttpContext.Connection.RemoteIpAddress?.ToString(),
-                FechaHora = DateTime.UtcNow
-            };
+                _contexto.Pacientes.Add(paciente);
+                await _contexto.SaveChangesAsync();
 
-            _contexto.Auditorias.Add(auditoria);
-            await _contexto.SaveChangesAsync();
+                var auditoria = new Auditoria
+                {
+                    IdUsuario = ObtenerIdUsuarioActual(),
+                    Accion = "CREAR_PACIENTE",
+                    Modulo = "Pacientes",
+                    Detalles =
+                        $"Paciente registrado. IdPaciente: {paciente.IdPaciente}",
+                    DireccionIP =
+                        HttpContext.Connection.RemoteIpAddress?.ToString(),
+                    FechaHora = DateTime.UtcNow
+                };
+
+                _contexto.Auditorias.Add(auditoria);
+
+                await _contexto.SaveChangesAsync();
+                await transaccion.CommitAsync();
+            }
+            catch (DbUpdateException excepcion)
+                when (EsErrorDuplicado(excepcion))
+            {
+                await transaccion.RollbackAsync();
+
+                return Conflict(new
+                {
+                    mensaje =
+                        "Ya existe un paciente registrado con ese documento de identidad."
+                });
+            }
+            catch
+            {
+                await transaccion.RollbackAsync();
+                throw;
+            }
 
             return Created(
                 $"/api/pacientes/{paciente.IdPaciente}",
@@ -105,12 +199,15 @@ namespace MedSecure.Controladores
         }
 
         [HttpPut("{idPaciente}")]
+        [Authorize(Roles = "Administrador,Medico,Recepcion")]
         public async Task<IActionResult> EditarPaciente(
             int idPaciente,
             [FromBody] SolicitudEdicionPaciente solicitud)
         {
             var paciente = await _contexto.Pacientes
-                .FirstOrDefaultAsync(p => p.IdPaciente == idPaciente);
+                .FirstOrDefaultAsync(
+                    p => p.IdPaciente == idPaciente
+                );
 
             if (paciente == null)
             {
@@ -120,32 +217,120 @@ namespace MedSecure.Controladores
                 });
             }
 
-            paciente.Nombres = solicitud.Nombres.Trim();
-            paciente.Apellidos = solicitud.Apellidos.Trim();
-            paciente.DocumentoIdentidad =
-                solicitud.DocumentoIdentidad?.Trim();
-            paciente.FechaNacimiento = solicitud.FechaNacimiento;
-            paciente.Sexo = solicitud.Sexo?.Trim();
-            paciente.Telefono = solicitud.Telefono?.Trim();
-            paciente.Correo = solicitud.Correo?.Trim();
-            paciente.Direccion = solicitud.Direccion?.Trim();
+            var nombres = solicitud.Nombres.Trim();
+            var apellidos = solicitud.Apellidos.Trim();
 
-            await _contexto.SaveChangesAsync();
-
-            var auditoria = new Auditoria
+            if (string.IsNullOrWhiteSpace(nombres))
             {
-                IdUsuario = ObtenerIdUsuarioActual(),
-                Accion = "EDITAR_PACIENTE",
-                Modulo = "Pacientes",
-                Detalles =
-                    $"Paciente actualizado. IdPaciente: {paciente.IdPaciente}",
-                DireccionIP =
-                    HttpContext.Connection.RemoteIpAddress?.ToString(),
-                FechaHora = DateTime.UtcNow
-            };
+                return BadRequest(new
+                {
+                    mensaje = "Los nombres del paciente son obligatorios."
+                });
+            }
 
-            _contexto.Auditorias.Add(auditoria);
-            await _contexto.SaveChangesAsync();
+            if (string.IsNullOrWhiteSpace(apellidos))
+            {
+                return BadRequest(new
+                {
+                    mensaje = "Los apellidos del paciente son obligatorios."
+                });
+            }
+
+            if (solicitud.FechaNacimiento.HasValue &&
+                solicitud.FechaNacimiento.Value.Date > DateTime.UtcNow.Date)
+            {
+                return BadRequest(new
+                {
+                    mensaje = "La fecha de nacimiento no puede ser futura."
+                });
+            }
+
+            var documentoIdentidad =
+                string.IsNullOrWhiteSpace(solicitud.DocumentoIdentidad)
+                    ? null
+                    : solicitud.DocumentoIdentidad.Trim();
+
+            if (documentoIdentidad != null)
+            {
+                var documentoDuplicado = await _contexto.Pacientes
+                    .AsNoTracking()
+                    .AnyAsync(p =>
+                        p.IdPaciente != idPaciente &&
+                        p.DocumentoIdentidad == documentoIdentidad);
+
+                if (documentoDuplicado)
+                {
+                    return Conflict(new
+                    {
+                        mensaje =
+                            "Ya existe otro paciente registrado con ese documento de identidad."
+                    });
+                }
+            }
+
+            await using var transaccion =
+                await _contexto.Database.BeginTransactionAsync();
+
+            try
+            {
+                paciente.Nombres = nombres;
+                paciente.Apellidos = apellidos;
+                paciente.DocumentoIdentidad = documentoIdentidad;
+                paciente.FechaNacimiento = solicitud.FechaNacimiento;
+
+                paciente.Sexo =
+                    string.IsNullOrWhiteSpace(solicitud.Sexo)
+                        ? null
+                        : solicitud.Sexo.Trim();
+
+                paciente.Telefono =
+                    string.IsNullOrWhiteSpace(solicitud.Telefono)
+                        ? null
+                        : solicitud.Telefono.Trim();
+
+                paciente.Correo =
+                    string.IsNullOrWhiteSpace(solicitud.Correo)
+                        ? null
+                        : solicitud.Correo.Trim();
+
+                paciente.Direccion =
+                    string.IsNullOrWhiteSpace(solicitud.Direccion)
+                        ? null
+                        : solicitud.Direccion.Trim();
+
+                var auditoria = new Auditoria
+                {
+                    IdUsuario = ObtenerIdUsuarioActual(),
+                    Accion = "EDITAR_PACIENTE",
+                    Modulo = "Pacientes",
+                    Detalles =
+                        $"Paciente actualizado. IdPaciente: {paciente.IdPaciente}",
+                    DireccionIP =
+                        HttpContext.Connection.RemoteIpAddress?.ToString(),
+                    FechaHora = DateTime.UtcNow
+                };
+
+                _contexto.Auditorias.Add(auditoria);
+
+                await _contexto.SaveChangesAsync();
+                await transaccion.CommitAsync();
+            }
+            catch (DbUpdateException excepcion)
+                when (EsErrorDuplicado(excepcion))
+            {
+                await transaccion.RollbackAsync();
+
+                return Conflict(new
+                {
+                    mensaje =
+                        "Ya existe otro paciente registrado con ese documento de identidad."
+                });
+            }
+            catch
+            {
+                await transaccion.RollbackAsync();
+                throw;
+            }
 
             return Ok(new
             {
@@ -154,10 +339,14 @@ namespace MedSecure.Controladores
         }
 
         [HttpPut("{idPaciente}/desactivar")]
-        public async Task<IActionResult> DesactivarPaciente(int idPaciente)
+        [Authorize(Roles = "Administrador,Recepcion")]
+        public async Task<IActionResult> DesactivarPaciente(
+            int idPaciente)
         {
             var paciente = await _contexto.Pacientes
-                .FirstOrDefaultAsync(p => p.IdPaciente == idPaciente);
+                .FirstOrDefaultAsync(
+                    p => p.IdPaciente == idPaciente
+                );
 
             if (paciente == null)
             {
@@ -169,30 +358,42 @@ namespace MedSecure.Controladores
 
             if (!paciente.Activo)
             {
-                return BadRequest(new
+                return Conflict(new
                 {
-                    mensaje = "El paciente ya se encuentra inactivo."
+                    mensaje =
+                        "El paciente ya se encuentra inactivo."
                 });
             }
 
-            paciente.Activo = false;
+            await using var transaccion =
+                await _contexto.Database.BeginTransactionAsync();
 
-            await _contexto.SaveChangesAsync();
-
-            var auditoria = new Auditoria
+            try
             {
-                IdUsuario = ObtenerIdUsuarioActual(),
-                Accion = "DESACTIVAR_PACIENTE",
-                Modulo = "Pacientes",
-                Detalles =
-                    $"Paciente desactivado. IdPaciente: {paciente.IdPaciente}",
-                DireccionIP =
-                    HttpContext.Connection.RemoteIpAddress?.ToString(),
-                FechaHora = DateTime.UtcNow
-            };
+                paciente.Activo = false;
 
-            _contexto.Auditorias.Add(auditoria);
-            await _contexto.SaveChangesAsync();
+                var auditoria = new Auditoria
+                {
+                    IdUsuario = ObtenerIdUsuarioActual(),
+                    Accion = "DESACTIVAR_PACIENTE",
+                    Modulo = "Pacientes",
+                    Detalles =
+                        $"Paciente desactivado. IdPaciente: {paciente.IdPaciente}",
+                    DireccionIP =
+                        HttpContext.Connection.RemoteIpAddress?.ToString(),
+                    FechaHora = DateTime.UtcNow
+                };
+
+                _contexto.Auditorias.Add(auditoria);
+
+                await _contexto.SaveChangesAsync();
+                await transaccion.CommitAsync();
+            }
+            catch
+            {
+                await transaccion.RollbackAsync();
+                throw;
+            }
 
             return Ok(new
             {
@@ -201,10 +402,14 @@ namespace MedSecure.Controladores
         }
 
         [HttpPut("{idPaciente}/reactivar")]
-        public async Task<IActionResult> ReactivarPaciente(int idPaciente)
+        [Authorize(Roles = "Administrador,Recepcion")]
+        public async Task<IActionResult> ReactivarPaciente(
+            int idPaciente)
         {
             var paciente = await _contexto.Pacientes
-                .FirstOrDefaultAsync(p => p.IdPaciente == idPaciente);
+                .FirstOrDefaultAsync(
+                    p => p.IdPaciente == idPaciente
+                );
 
             if (paciente == null)
             {
@@ -216,30 +421,42 @@ namespace MedSecure.Controladores
 
             if (paciente.Activo)
             {
-                return BadRequest(new
+                return Conflict(new
                 {
-                    mensaje = "El paciente ya se encuentra activo."
+                    mensaje =
+                        "El paciente ya se encuentra activo."
                 });
             }
 
-            paciente.Activo = true;
+            await using var transaccion =
+                await _contexto.Database.BeginTransactionAsync();
 
-            await _contexto.SaveChangesAsync();
-
-            var auditoria = new Auditoria
+            try
             {
-                IdUsuario = ObtenerIdUsuarioActual(),
-                Accion = "REACTIVAR_PACIENTE",
-                Modulo = "Pacientes",
-                Detalles =
-                    $"Paciente reactivado. IdPaciente: {paciente.IdPaciente}",
-                DireccionIP =
-                    HttpContext.Connection.RemoteIpAddress?.ToString(),
-                FechaHora = DateTime.UtcNow
-            };
+                paciente.Activo = true;
 
-            _contexto.Auditorias.Add(auditoria);
-            await _contexto.SaveChangesAsync();
+                var auditoria = new Auditoria
+                {
+                    IdUsuario = ObtenerIdUsuarioActual(),
+                    Accion = "REACTIVAR_PACIENTE",
+                    Modulo = "Pacientes",
+                    Detalles =
+                        $"Paciente reactivado. IdPaciente: {paciente.IdPaciente}",
+                    DireccionIP =
+                        HttpContext.Connection.RemoteIpAddress?.ToString(),
+                    FechaHora = DateTime.UtcNow
+                };
+
+                _contexto.Auditorias.Add(auditoria);
+
+                await _contexto.SaveChangesAsync();
+                await transaccion.CommitAsync();
+            }
+            catch
+            {
+                await transaccion.RollbackAsync();
+                throw;
+            }
 
             return Ok(new
             {

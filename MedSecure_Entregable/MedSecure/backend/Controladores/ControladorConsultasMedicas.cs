@@ -10,7 +10,7 @@ namespace MedSecure.Controladores
 {
     [ApiController]
     [Route("api/consultas-medicas")]
-    [Authorize]
+    [Authorize(Roles = "Administrador,Medico")]
     public class ControladorConsultasMedicasController : ControllerBase
     {
         private readonly ContextoBaseDatos _contexto;
@@ -33,10 +33,12 @@ namespace MedSecure.Controladores
 
             return null;
         }
+
         [HttpGet]
         public async Task<IActionResult> ObtenerConsultasMedicas()
         {
             var consultas = await _contexto.ConsultasMedicas
+                .AsNoTracking()
                 .OrderByDescending(c => c.FechaConsulta)
                 .Select(c => new
                 {
@@ -45,18 +47,21 @@ namespace MedSecure.Controladores
                     c.IdUsuario,
 
                     NombrePaciente = _contexto.Expedientes
-                        .Where(e => e.IdExpediente == c.IdExpediente)
+                        .Where(e =>
+                            e.IdExpediente == c.IdExpediente)
                         .Join(
                             _contexto.Pacientes,
                             e => e.IdPaciente,
                             p => p.IdPaciente,
-                            (e, p) => p.Nombres + " " + p.Apellidos
+                            (e, p) =>
+                                p.Nombres + " " + p.Apellidos
                         )
                         .FirstOrDefault(),
 
                     NombreUsuario = c.IdUsuario.HasValue
                         ? _contexto.Usuarios
-                            .Where(u => u.IdUsuario == c.IdUsuario.Value)
+                            .Where(u =>
+                                u.IdUsuario == c.IdUsuario.Value)
                             .Select(u => u.NombreUsuario)
                             .FirstOrDefault()
                         : null,
@@ -76,36 +81,80 @@ namespace MedSecure.Controladores
 
         [HttpPost]
         public async Task<IActionResult> RegistrarConsultaMedica(
-            SolicitudRegistroConsultaMedica solicitud)
+            [FromBody] SolicitudRegistroConsultaMedica solicitud)
         {
+            if (solicitud.IdExpediente <= 0)
+            {
+                return BadRequest(new
+                {
+                    mensaje =
+                        "Debe seleccionar un expediente válido."
+                });
+            }
+
             var expediente = await _contexto.Expedientes
-                .FirstOrDefaultAsync(e => e.IdExpediente == solicitud.IdExpediente);
+                .AsNoTracking()
+                .FirstOrDefaultAsync(
+                    e => e.IdExpediente == solicitud.IdExpediente
+                );
 
             if (expediente == null)
             {
-                return NotFound("El expediente indicado no existe.");
+                return NotFound(new
+                {
+                    mensaje =
+                        "El expediente indicado no existe."
+                });
             }
 
             var paciente = await _contexto.Pacientes
-                .FirstOrDefaultAsync(p => p.IdPaciente == expediente.IdPaciente);
+                .AsNoTracking()
+                .FirstOrDefaultAsync(
+                    p => p.IdPaciente == expediente.IdPaciente
+                );
 
             if (paciente == null)
             {
-                return NotFound("El paciente asociado al expediente no existe.");
+                return NotFound(new
+                {
+                    mensaje =
+                        "El paciente asociado al expediente no existe."
+                });
             }
 
             if (!paciente.Activo)
             {
-                return BadRequest(
-                    "No se puede registrar una consulta para un paciente inactivo."
-                );
+                return Conflict(new
+                {
+                    mensaje =
+                        "No se puede registrar una consulta para un paciente inactivo."
+                });
             }
 
             var idUsuario = ObtenerIdUsuarioActual();
 
             if (!idUsuario.HasValue)
             {
-                return Unauthorized();
+                return Unauthorized(new
+                {
+                    mensaje =
+                        "No se pudo identificar al usuario autenticado."
+                });
+            }
+
+            var usuario = await _contexto.Usuarios
+                .AsNoTracking()
+                .FirstOrDefaultAsync(
+                    u => u.IdUsuario == idUsuario.Value
+                );
+
+            if (usuario == null || !usuario.Activo)
+            {
+                return Unauthorized(new
+                {
+                    mensaje =
+                        "El usuario autenticado no se encuentra activo."
+                });
             }
 
             var consulta = new ConsultaMedica
@@ -114,55 +163,90 @@ namespace MedSecure.Controladores
                 IdUsuario = idUsuario.Value,
                 FechaConsulta = DateTime.UtcNow,
 
-                MotivoConsulta = string.IsNullOrWhiteSpace(solicitud.MotivoConsulta)
-                    ? null
-                    : solicitud.MotivoConsulta.Trim(),
+                MotivoConsulta =
+                    string.IsNullOrWhiteSpace(
+                        solicitud.MotivoConsulta
+                    )
+                        ? null
+                        : solicitud.MotivoConsulta.Trim(),
 
-                Diagnostico = string.IsNullOrWhiteSpace(solicitud.Diagnostico)
-                    ? null
-                    : solicitud.Diagnostico.Trim(),
+                Diagnostico =
+                    string.IsNullOrWhiteSpace(
+                        solicitud.Diagnostico
+                    )
+                        ? null
+                        : solicitud.Diagnostico.Trim(),
 
-                Tratamiento = string.IsNullOrWhiteSpace(solicitud.Tratamiento)
-                    ? null
-                    : solicitud.Tratamiento.Trim(),
+                Tratamiento =
+                    string.IsNullOrWhiteSpace(
+                        solicitud.Tratamiento
+                    )
+                        ? null
+                        : solicitud.Tratamiento.Trim(),
 
-                Medicamentos = string.IsNullOrWhiteSpace(solicitud.Medicamentos)
-                    ? null
-                    : solicitud.Medicamentos.Trim(),
+                Medicamentos =
+                    string.IsNullOrWhiteSpace(
+                        solicitud.Medicamentos
+                    )
+                        ? null
+                        : solicitud.Medicamentos.Trim(),
 
-                Observaciones = string.IsNullOrWhiteSpace(solicitud.Observaciones)
-                    ? null
-                    : solicitud.Observaciones.Trim(),
+                Observaciones =
+                    string.IsNullOrWhiteSpace(
+                        solicitud.Observaciones
+                    )
+                        ? null
+                        : solicitud.Observaciones.Trim(),
 
                 ResultadosExamenes =
-                    string.IsNullOrWhiteSpace(solicitud.ResultadosExamenes)
+                    string.IsNullOrWhiteSpace(
+                        solicitud.ResultadosExamenes
+                    )
                         ? null
                         : solicitud.ResultadosExamenes.Trim()
             };
 
-            _contexto.ConsultasMedicas.Add(consulta);
-            await _contexto.SaveChangesAsync();
+            await using var transaccion =
+                await _contexto.Database.BeginTransactionAsync();
 
-            var auditoria = new Auditoria
+            try
             {
-                IdUsuario = idUsuario.Value,
-                Accion = "CREAR_CONSULTA_MEDICA",
-                Modulo = "ConsultasMedicas",
-                Detalles =
-                    $"Consulta médica registrada. IdConsulta: {consulta.IdConsulta}",
-                DireccionIP =
-                    HttpContext.Connection.RemoteIpAddress?.ToString(),
-                FechaHora = DateTime.UtcNow
-            };
+                _contexto.ConsultasMedicas.Add(consulta);
 
-            _contexto.Auditorias.Add(auditoria);
-            await _contexto.SaveChangesAsync();
+                await _contexto.SaveChangesAsync();
+
+                var auditoria = new Auditoria
+                {
+                    IdUsuario = idUsuario.Value,
+                    Accion = "CREAR_CONSULTA_MEDICA",
+                    Modulo = "ConsultasMedicas",
+
+                    Detalles =
+                        $"Consulta médica registrada. IdConsulta: {consulta.IdConsulta}",
+
+                    DireccionIP =
+                        HttpContext.Connection.RemoteIpAddress?.ToString(),
+
+                    FechaHora = DateTime.UtcNow
+                };
+
+                _contexto.Auditorias.Add(auditoria);
+
+                await _contexto.SaveChangesAsync();
+                await transaccion.CommitAsync();
+            }
+            catch
+            {
+                await transaccion.RollbackAsync();
+                throw;
+            }
 
             return Created(
                 $"/api/consultas-medicas/{consulta.IdConsulta}",
                 new
                 {
-                    mensaje = "Consulta médica registrada correctamente.",
+                    mensaje =
+                        "Consulta médica registrada correctamente.",
                     idConsulta = consulta.IdConsulta
                 }
             );
@@ -171,64 +255,165 @@ namespace MedSecure.Controladores
         [HttpPut("{idConsulta}")]
         public async Task<IActionResult> ActualizarConsultaMedica(
             int idConsulta,
-            SolicitudEdicionConsultaMedica solicitud)
+            [FromBody] SolicitudEdicionConsultaMedica solicitud)
         {
             var consulta = await _contexto.ConsultasMedicas
-                .FirstOrDefaultAsync(c => c.IdConsulta == idConsulta);
+                .FirstOrDefaultAsync(
+                    c => c.IdConsulta == idConsulta
+                );
 
             if (consulta == null)
             {
-                return NotFound("La consulta médica indicada no existe.");
+                return NotFound(new
+                {
+                    mensaje =
+                        "La consulta médica indicada no existe."
+                });
             }
 
-            consulta.MotivoConsulta =
-                string.IsNullOrWhiteSpace(solicitud.MotivoConsulta)
-                    ? null
-                    : solicitud.MotivoConsulta.Trim();
+            var expediente = await _contexto.Expedientes
+                .AsNoTracking()
+                .FirstOrDefaultAsync(
+                    e => e.IdExpediente == consulta.IdExpediente
+                );
 
-            consulta.Diagnostico =
-                string.IsNullOrWhiteSpace(solicitud.Diagnostico)
-                    ? null
-                    : solicitud.Diagnostico.Trim();
-
-            consulta.Tratamiento =
-                string.IsNullOrWhiteSpace(solicitud.Tratamiento)
-                    ? null
-                    : solicitud.Tratamiento.Trim();
-
-            consulta.Medicamentos =
-                string.IsNullOrWhiteSpace(solicitud.Medicamentos)
-                    ? null
-                    : solicitud.Medicamentos.Trim();
-
-            consulta.Observaciones =
-                string.IsNullOrWhiteSpace(solicitud.Observaciones)
-                    ? null
-                    : solicitud.Observaciones.Trim();
-
-            consulta.ResultadosExamenes =
-                string.IsNullOrWhiteSpace(solicitud.ResultadosExamenes)
-                    ? null
-                    : solicitud.ResultadosExamenes.Trim();
-
-            await _contexto.SaveChangesAsync();
-
-            var auditoria = new Auditoria
+            if (expediente == null)
             {
-                IdUsuario = ObtenerIdUsuarioActual(),
-                Accion = "EDITAR_CONSULTA_MEDICA",
-                Modulo = "ConsultasMedicas",
-                Detalles =
-                    $"Consulta médica actualizada. IdConsulta: {consulta.IdConsulta}",
-                DireccionIP =
-                    HttpContext.Connection.RemoteIpAddress?.ToString(),
-                FechaHora = DateTime.UtcNow
-            };
+                return NotFound(new
+                {
+                    mensaje =
+                        "El expediente asociado a la consulta no existe."
+                });
+            }
 
-            _contexto.Auditorias.Add(auditoria);
-            await _contexto.SaveChangesAsync();
+            var paciente = await _contexto.Pacientes
+                .AsNoTracking()
+                .FirstOrDefaultAsync(
+                    p => p.IdPaciente == expediente.IdPaciente
+                );
 
-            return Ok("Consulta médica actualizada correctamente.");
+            if (paciente == null)
+            {
+                return NotFound(new
+                {
+                    mensaje =
+                        "El paciente asociado al expediente no existe."
+                });
+            }
+
+            if (!paciente.Activo)
+            {
+                return Conflict(new
+                {
+                    mensaje =
+                        "No se puede modificar una consulta de un paciente inactivo."
+                });
+            }
+
+            var idUsuario = ObtenerIdUsuarioActual();
+
+            if (!idUsuario.HasValue)
+            {
+                return Unauthorized(new
+                {
+                    mensaje =
+                        "No se pudo identificar al usuario autenticado."
+                });
+            }
+
+            var usuarioActual = await _contexto.Usuarios
+                .AsNoTracking()
+                .FirstOrDefaultAsync(
+                    u => u.IdUsuario == idUsuario.Value
+                );
+
+            if (usuarioActual == null || !usuarioActual.Activo)
+            {
+                return Unauthorized(new
+                {
+                    mensaje =
+                        "El usuario autenticado no se encuentra activo."
+                });
+            }
+
+            await using var transaccion =
+                await _contexto.Database.BeginTransactionAsync();
+
+            try
+            {
+                consulta.MotivoConsulta =
+                    string.IsNullOrWhiteSpace(
+                        solicitud.MotivoConsulta
+                    )
+                        ? null
+                        : solicitud.MotivoConsulta.Trim();
+
+                consulta.Diagnostico =
+                    string.IsNullOrWhiteSpace(
+                        solicitud.Diagnostico
+                    )
+                        ? null
+                        : solicitud.Diagnostico.Trim();
+
+                consulta.Tratamiento =
+                    string.IsNullOrWhiteSpace(
+                        solicitud.Tratamiento
+                    )
+                        ? null
+                        : solicitud.Tratamiento.Trim();
+
+                consulta.Medicamentos =
+                    string.IsNullOrWhiteSpace(
+                        solicitud.Medicamentos
+                    )
+                        ? null
+                        : solicitud.Medicamentos.Trim();
+
+                consulta.Observaciones =
+                    string.IsNullOrWhiteSpace(
+                        solicitud.Observaciones
+                    )
+                        ? null
+                        : solicitud.Observaciones.Trim();
+
+                consulta.ResultadosExamenes =
+                    string.IsNullOrWhiteSpace(
+                        solicitud.ResultadosExamenes
+                    )
+                        ? null
+                        : solicitud.ResultadosExamenes.Trim();
+
+                var auditoria = new Auditoria
+                {
+                    IdUsuario = idUsuario.Value,
+                    Accion = "EDITAR_CONSULTA_MEDICA",
+                    Modulo = "ConsultasMedicas",
+
+                    Detalles =
+                        $"Consulta médica actualizada. IdConsulta: {consulta.IdConsulta}",
+
+                    DireccionIP =
+                        HttpContext.Connection.RemoteIpAddress?.ToString(),
+
+                    FechaHora = DateTime.UtcNow
+                };
+
+                _contexto.Auditorias.Add(auditoria);
+
+                await _contexto.SaveChangesAsync();
+                await transaccion.CommitAsync();
+            }
+            catch
+            {
+                await transaccion.RollbackAsync();
+                throw;
+            }
+
+            return Ok(new
+            {
+                mensaje =
+                    "Consulta médica actualizada correctamente."
+            });
         }
     }
 }

@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import api from '../servicios/api'
 
 function ConsultasMedicas() {
-
     const [consultas, setConsultas] = useState([])
     const [expedientes, setExpedientes] = useState([])
     const [cargando, setCargando] = useState(true)
@@ -21,25 +20,65 @@ function ConsultasMedicas() {
 
     const [mensaje, setMensaje] = useState('')
     const [errorRegistro, setErrorRegistro] = useState('')
-    
-    useEffect(() => {
-        const obtenerConsultas = async () => {
-            try {
-                const [respuestaConsultas, respuestaExpedientes] = await Promise.all([
-                    api.get('/consultas-medicas'),
-                    api.get('/expedientes')
-                ])
 
-                setConsultas(respuestaConsultas.data)
-                setExpedientes(respuestaExpedientes.data)
-            } catch (error) {
-                setError('No fue posible obtener las consultas médicas.')
+    const obtenerMensajeError = (
+        error,
+        mensajePredeterminado
+    ) => {
+        const datos = error.response?.data
+
+        if (typeof datos === 'string') {
+            return datos
+        }
+
+        if (datos?.mensaje) {
+            return datos.mensaje
+        }
+
+        return mensajePredeterminado
+    }
+
+    const limpiarFormulario = () => {
+        setFormulario({
+            idExpediente: '',
+            motivoConsulta: '',
+            diagnostico: '',
+            tratamiento: '',
+            medicamentos: '',
+            observaciones: '',
+            resultadosExamenes: ''
+        })
+
+        setConsultaEditando(null)
+    }
+
+    const cargarDatos = async () => {
+        const [
+            respuestaConsultas,
+            respuestaExpedientes
+        ] = await Promise.all([
+            api.get('/consultas-medicas'),
+            api.get('/expedientes')
+        ])
+
+        setConsultas(respuestaConsultas.data)
+        setExpedientes(respuestaExpedientes.data)
+    }
+
+    useEffect(() => {
+        const obtenerDatos = async () => {
+            try {
+                await cargarDatos()
+            } catch {
+                setError(
+                    'No fue posible obtener las consultas médicas.'
+                )
             } finally {
                 setCargando(false)
             }
         }
 
-        obtenerConsultas()
+        obtenerDatos()
     }, [])
 
     const manejarCambio = (e) => {
@@ -61,11 +100,24 @@ function ConsultasMedicas() {
             tratamiento: consulta.tratamiento || '',
             medicamentos: consulta.medicamentos || '',
             observaciones: consulta.observaciones || '',
-            resultadosExamenes: consulta.resultadosExamenes || ''
+            resultadosExamenes:
+                consulta.resultadosExamenes || ''
         })
 
         setMensaje('')
         setErrorRegistro('')
+    }
+
+    const cancelarEdicion = () => {
+        limpiarFormulario()
+        setMensaje('')
+        setErrorRegistro('')
+    }
+
+    const normalizarTexto = (valor) => {
+        const texto = valor.trim()
+
+        return texto === '' ? null : texto
     }
 
     const registrarConsulta = async (e) => {
@@ -74,60 +126,60 @@ function ConsultasMedicas() {
         setMensaje('')
         setErrorRegistro('')
 
+        if (!formulario.idExpediente) {
+            setErrorRegistro(
+                'Debe seleccionar un expediente.'
+            )
+            return
+        }
+
         try {
-            await api.post('/consultas-medicas', {
-                idExpediente: Number(formulario.idExpediente),
+            const respuesta = await api.post(
+                '/consultas-medicas',
+                {
+                    idExpediente: Number(
+                        formulario.idExpediente
+                    ),
+                    motivoConsulta:
+                        normalizarTexto(
+                            formulario.motivoConsulta
+                        ),
+                    diagnostico:
+                        normalizarTexto(
+                            formulario.diagnostico
+                        ),
+                    tratamiento:
+                        normalizarTexto(
+                            formulario.tratamiento
+                        ),
+                    medicamentos:
+                        normalizarTexto(
+                            formulario.medicamentos
+                        ),
+                    observaciones:
+                        normalizarTexto(
+                            formulario.observaciones
+                        ),
+                    resultadosExamenes:
+                        normalizarTexto(
+                            formulario.resultadosExamenes
+                        )
+                }
+            )
 
-                motivoConsulta:
-                    formulario.motivoConsulta.trim() === ''
-                        ? null
-                        : formulario.motivoConsulta,
+            await cargarDatos()
+            limpiarFormulario()
 
-                diagnostico:
-                    formulario.diagnostico.trim() === ''
-                        ? null
-                        : formulario.diagnostico,
-
-                tratamiento:
-                    formulario.tratamiento.trim() === ''
-                        ? null
-                        : formulario.tratamiento,
-
-                medicamentos:
-                    formulario.medicamentos.trim() === ''
-                        ? null
-                        : formulario.medicamentos,
-
-                observaciones:
-                    formulario.observaciones.trim() === ''
-                        ? null
-                        : formulario.observaciones,
-
-                resultadosExamenes:
-                    formulario.resultadosExamenes.trim() === ''
-                        ? null
-                        : formulario.resultadosExamenes
-            })
-
-            const respuesta = await api.get('/consultas-medicas')
-            setConsultas(respuesta.data)
-
-            setFormulario({
-                idExpediente: '',
-                motivoConsulta: '',
-                diagnostico: '',
-                tratamiento: '',
-                medicamentos: '',
-                observaciones: '',
-                resultadosExamenes: ''
-            })
-
-            setMensaje('Consulta médica registrada correctamente.')
+            setMensaje(
+                respuesta.data?.mensaje ||
+                'Consulta médica registrada correctamente.'
+            )
         } catch (error) {
             setErrorRegistro(
-                typeof error.response?.data === 'string'
-                    ? error.response.data
-                    : 'No fue posible registrar la consulta médica.'
+                obtenerMensajeError(
+                    error,
+                    'No fue posible registrar la consulta médica.'
+                )
             )
         }
     }
@@ -135,69 +187,72 @@ function ConsultasMedicas() {
     const actualizarConsulta = async (e) => {
         e.preventDefault()
 
+        if (!consultaEditando) {
+            return
+        }
+
         setMensaje('')
         setErrorRegistro('')
 
         try {
-            await api.put(
+            const respuesta = await api.put(
                 `/consultas-medicas/${consultaEditando.idConsulta}`,
                 {
                     motivoConsulta:
-                        formulario.motivoConsulta.trim() === ''
-                            ? null
-                            : formulario.motivoConsulta,
-
+                        normalizarTexto(
+                            formulario.motivoConsulta
+                        ),
                     diagnostico:
-                        formulario.diagnostico.trim() === ''
-                            ? null
-                            : formulario.diagnostico,
-
+                        normalizarTexto(
+                            formulario.diagnostico
+                        ),
                     tratamiento:
-                        formulario.tratamiento.trim() === ''
-                            ? null
-                            : formulario.tratamiento,
-
+                        normalizarTexto(
+                            formulario.tratamiento
+                        ),
                     medicamentos:
-                        formulario.medicamentos.trim() === ''
-                            ? null
-                            : formulario.medicamentos,
-
+                        normalizarTexto(
+                            formulario.medicamentos
+                        ),
                     observaciones:
-                        formulario.observaciones.trim() === ''
-                            ? null
-                            : formulario.observaciones,
-
+                        normalizarTexto(
+                            formulario.observaciones
+                        ),
                     resultadosExamenes:
-                        formulario.resultadosExamenes.trim() === ''
-                            ? null
-                            : formulario.resultadosExamenes
+                        normalizarTexto(
+                            formulario.resultadosExamenes
+                        )
                 }
             )
 
-            const respuesta = await api.get('/consultas-medicas')
-            setConsultas(respuesta.data)
+            await cargarDatos()
+            limpiarFormulario()
 
-            setConsultaEditando(null)
-
-            setFormulario({
-                idExpediente: '',
-                motivoConsulta: '',
-                diagnostico: '',
-                tratamiento: '',
-                medicamentos: '',
-                observaciones: '',
-                resultadosExamenes: ''
-            })
-
-            setMensaje('Consulta médica actualizada correctamente.')
+            setMensaje(
+                respuesta.data?.mensaje ||
+                'Consulta médica actualizada correctamente.'
+            )
         } catch (error) {
             setErrorRegistro(
-                typeof error.response?.data === 'string'
-                    ? error.response.data
-                    : 'No fue posible actualizar la consulta médica.'
+                obtenerMensajeError(
+                    error,
+                    'No fue posible actualizar la consulta médica.'
+                )
             )
         }
     }
+
+    const expedientesActivos = expedientes.filter(
+        expediente => expediente.pacienteActivo
+    )
+
+    const expedientesSelector = consultaEditando
+        ? expedientes.filter(
+            expediente =>
+                expediente.idExpediente ===
+                consultaEditando.idExpediente
+        )
+        : expedientesActivos
 
     return (
         <div>
@@ -210,10 +265,18 @@ function ConsultasMedicas() {
             <div className="card mb-4">
                 <div className="card-body">
                     <h5 className="card-title mb-3">
-                        Registrar consulta médica
+                        {consultaEditando
+                            ? 'Editar consulta médica'
+                            : 'Registrar consulta médica'}
                     </h5>
 
-                    <form onSubmit={consultaEditando? actualizarConsulta: registrarConsulta}>
+                    <form
+                        onSubmit={
+                            consultaEditando
+                                ? actualizarConsulta
+                                : registrarConsulta
+                        }
+                    >
                         <div className="mb-3">
                             <label className="form-label">
                                 Expediente / Paciente
@@ -225,21 +288,39 @@ function ConsultasMedicas() {
                                 value={formulario.idExpediente}
                                 onChange={manejarCambio}
                                 required
-                                disabled={consultaEditando !== null}
+                                disabled={
+                                    consultaEditando !== null
+                                }
                             >
                                 <option value="">
                                     Seleccione un expediente
                                 </option>
 
-                                {expedientes.map((expediente) => (
-                                    <option
-                                        key={expediente.idExpediente}
-                                        value={expediente.idExpediente}
-                                    >
-                                        Expediente #{expediente.idExpediente} - {expediente.nombrePaciente}
-                                    </option>
-                                ))}
+                                {expedientesSelector.map(
+                                    expediente => (
+                                        <option
+                                            key={
+                                                expediente.idExpediente
+                                            }
+                                            value={
+                                                expediente.idExpediente
+                                            }
+                                        >
+                                            Expediente #
+                                            {expediente.idExpediente}
+                                            {' - '}
+                                            {expediente.nombrePaciente}
+                                        </option>
+                                    )
+                                )}
                             </select>
+
+                            {!consultaEditando &&
+                                expedientesActivos.length === 0 && (
+                                    <div className="form-text">
+                                        No hay expedientes de pacientes activos disponibles.
+                                    </div>
+                                )}
                         </div>
 
                         <div className="mb-3">
@@ -253,7 +334,12 @@ function ConsultasMedicas() {
                                 value={formulario.motivoConsulta}
                                 onChange={manejarCambio}
                                 rows="2"
+                                maxLength="500"
                             />
+
+                            <div className="form-text text-end">
+                                {formulario.motivoConsulta.length}/500
+                            </div>
                         </div>
 
                         <div className="mb-3">
@@ -267,7 +353,12 @@ function ConsultasMedicas() {
                                 value={formulario.diagnostico}
                                 onChange={manejarCambio}
                                 rows="2"
+                                maxLength="1000"
                             />
+
+                            <div className="form-text text-end">
+                                {formulario.diagnostico.length}/1000
+                            </div>
                         </div>
 
                         <div className="mb-3">
@@ -281,7 +372,12 @@ function ConsultasMedicas() {
                                 value={formulario.tratamiento}
                                 onChange={manejarCambio}
                                 rows="2"
+                                maxLength="1000"
                             />
+
+                            <div className="form-text text-end">
+                                {formulario.tratamiento.length}/1000
+                            </div>
                         </div>
 
                         <div className="mb-3">
@@ -295,7 +391,12 @@ function ConsultasMedicas() {
                                 value={formulario.medicamentos}
                                 onChange={manejarCambio}
                                 rows="2"
+                                maxLength="1000"
                             />
+
+                            <div className="form-text text-end">
+                                {formulario.medicamentos.length}/1000
+                            </div>
                         </div>
 
                         <div className="mb-3">
@@ -309,7 +410,12 @@ function ConsultasMedicas() {
                                 value={formulario.observaciones}
                                 onChange={manejarCambio}
                                 rows="2"
+                                maxLength="1000"
                             />
+
+                            <div className="form-text text-end">
+                                {formulario.observaciones.length}/1000
+                            </div>
                         </div>
 
                         <div className="mb-3">
@@ -323,18 +429,38 @@ function ConsultasMedicas() {
                                 value={formulario.resultadosExamenes}
                                 onChange={manejarCambio}
                                 rows="2"
+                                maxLength="2000"
                             />
+
+                            <div className="form-text text-end">
+                                {formulario.resultadosExamenes.length}/2000
+                            </div>
                         </div>
 
-                        <button
-                            type="submit"
-                            className="btn btn-primary"
-                        >
-                            {consultaEditando
-                                ? 'Guardar cambios'
-                                : 'Registrar consulta'}
-                        </button>
+                        <div className="d-flex gap-2">
+                            <button
+                                type="submit"
+                                className="btn btn-primary"
+                                disabled={
+                                    !consultaEditando &&
+                                    expedientesActivos.length === 0
+                                }
+                            >
+                                {consultaEditando
+                                    ? 'Guardar cambios'
+                                    : 'Registrar consulta'}
+                            </button>
 
+                            {consultaEditando && (
+                                <button
+                                    type="button"
+                                    className="btn btn-secondary"
+                                    onClick={cancelarEdicion}
+                                >
+                                    Cancelar
+                                </button>
+                            )}
+                        </div>
                     </form>
 
                     {mensaje && (
@@ -384,7 +510,9 @@ function ConsultasMedicas() {
                                         <th>Tratamiento</th>
                                         <th>Medicamentos</th>
                                         <th>Observaciones</th>
-                                        <th>Resultados de exámenes</th>
+                                        <th>
+                                            Resultados de exámenes
+                                        </th>
                                         <th>Acciones</th>
                                     </tr>
                                 </thead>
@@ -400,62 +528,105 @@ function ConsultasMedicas() {
                                             </td>
                                         </tr>
                                     ) : (
-                                        consultas.map((consulta) => (
-                                            <tr key={consulta.idConsulta}>
-                                                <td>{consulta.idConsulta}</td>
+                                        consultas.map(
+                                            consulta => {
+                                                const expediente =
+                                                    expedientes.find(
+                                                        item =>
+                                                            item.idExpediente ===
+                                                            consulta.idExpediente
+                                                    )
 
-                                                <td>
-                                                    {consulta.nombrePaciente || 'Sin información'}
-                                                </td>
+                                                const pacienteActivo =
+                                                    expediente
+                                                        ?.pacienteActivo !==
+                                                    false
 
-                                                <td>
-                                                    #{consulta.idExpediente}
-                                                </td>
-
-                                                <td>
-                                                    {consulta.nombreUsuario || 'Sin información'}
-                                                </td>
-
-                                                <td>
-                                                    {new Date(
-                                                        consulta.fechaConsulta
-                                                    ).toLocaleString()}
-                                                </td>
-
-                                                <td>
-                                                    {consulta.motivoConsulta || '—'}
-                                                </td>
-
-                                                <td>
-                                                    {consulta.diagnostico || '—'}
-                                                </td>
-
-                                                <td>
-                                                    {consulta.tratamiento || '—'}
-                                                </td>
-
-                                                <td>
-                                                    {consulta.medicamentos || '—'}
-                                                </td>
-
-                                                <td>
-                                                    {consulta.observaciones || '—'}
-                                                </td>
-
-                                                <td>
-                                                    {consulta.resultadosExamenes || '—'}
-                                                </td>
-                                                <td>
-                                                    <button
-                                                        type="button"
-                                                        className="btn btn-sm btn-warning"
-                                                        onClick={() => iniciarEdicion(consulta)}
+                                                return (
+                                                    <tr
+                                                        key={
+                                                            consulta.idConsulta
+                                                        }
                                                     >
-                                                        Editar
-                                                    </button>
-                                                </td>
-                                            </tr>
-                                        ))
+                                                        <td>
+                                                            {
+                                                                consulta.idConsulta
+                                                            }
+                                                        </td>
+
+                                                        <td>
+                                                            {consulta.nombrePaciente ||
+                                                                'Sin información'}
+                                                        </td>
+
+                                                        <td>
+                                                            #
+                                                            {
+                                                                consulta.idExpediente
+                                                            }
+                                                        </td>
+
+                                                        <td>
+                                                            {consulta.nombreUsuario ||
+                                                                'Sin información'}
+                                                        </td>
+
+                                                        <td>
+                                                            {new Date(
+                                                                consulta.fechaConsulta
+                                                            ).toLocaleString()}
+                                                        </td>
+
+                                                        <td>
+                                                            {consulta.motivoConsulta ||
+                                                                '—'}
+                                                        </td>
+
+                                                        <td>
+                                                            {consulta.diagnostico ||
+                                                                '—'}
+                                                        </td>
+
+                                                        <td>
+                                                            {consulta.tratamiento ||
+                                                                '—'}
+                                                        </td>
+
+                                                        <td>
+                                                            {consulta.medicamentos ||
+                                                                '—'}
+                                                        </td>
+
+                                                        <td>
+                                                            {consulta.observaciones ||
+                                                                '—'}
+                                                        </td>
+
+                                                        <td>
+                                                            {consulta.resultadosExamenes ||
+                                                                '—'}
+                                                        </td>
+
+                                                        <td>
+                                                            <button
+                                                                type="button"
+                                                                className="btn btn-sm btn-warning"
+                                                                onClick={() =>
+                                                                    iniciarEdicion(
+                                                                        consulta
+                                                                    )
+                                                                }
+                                                                disabled={
+                                                                    !pacienteActivo
+                                                                }
+                                                            >
+                                                                Editar
+                                                            </button>
+                                                        </td>
+                                                    </tr>
+                                                )
+                                            }
+                                        )
                                     )}
                                 </tbody>
                             </table>

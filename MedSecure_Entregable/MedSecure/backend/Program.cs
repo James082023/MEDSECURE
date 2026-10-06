@@ -5,7 +5,6 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
 using System.Security.Claims;
-using Microsoft.AspNetCore.Authentication;
 using System.Threading.RateLimiting;
 
 var constructor = WebApplication.CreateBuilder(args);
@@ -34,18 +33,19 @@ constructor.Services.AddRateLimiter(opciones =>
 
     opciones.RejectionStatusCode =
         StatusCodes.Status429TooManyRequests;
-        opciones.OnRejected = async (contexto, tokenCancelacion) =>
-{
-    contexto.HttpContext.Response.Headers.RetryAfter = "60";
 
-    await contexto.HttpContext.Response.WriteAsJsonAsync(
-        new
-        {
-            mensaje = "Demasiados intentos. Intenta nuevamente más tarde."
-        },
-        cancellationToken: tokenCancelacion
-    );
-};
+    opciones.OnRejected = async (contexto, tokenCancelacion) =>
+    {
+        contexto.HttpContext.Response.Headers.RetryAfter = "60";
+
+        await contexto.HttpContext.Response.WriteAsJsonAsync(
+            new
+            {
+                mensaje = "Demasiados intentos. Intenta nuevamente más tarde."
+            },
+            cancellationToken: tokenCancelacion
+        );
+    };
 });
 
 string claveJwt = constructor.Configuration["Jwt:Clave"]
@@ -60,7 +60,7 @@ string audienciaJwt = constructor.Configuration["Jwt:Audiencia"]
     ?? throw new InvalidOperationException(
         "No se encontró la configuración Jwt:Audiencia.");
 
-    constructor.Services
+constructor.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(opciones =>
     {
@@ -91,31 +91,62 @@ string audienciaJwt = constructor.Configuration["Jwt:Audiencia"]
 
                 if (!int.TryParse(idTexto, out int idUsuario))
                 {
-                    contexto.Fail("El token no contiene un usuario válido.");
+                    contexto.Fail(
+                        "El token no contiene un usuario válido."
+                    );
+
                     return;
                 }
-
-                var baseDatos = contexto.HttpContext.RequestServices
-                    .GetRequiredService<ContextoBaseDatos>();
 
                 string? versionTexto = contexto.Principal?
                     .FindFirst("VersionToken")?.Value;
 
-                if (!int.TryParse(versionTexto, out int versionToken))
+                if (!int.TryParse(
+                    versionTexto,
+                    out int versionToken))
                 {
-                    contexto.Fail("El token no contiene una versión válida.");
+                    contexto.Fail(
+                        "El token no contiene una versión válida."
+                    );
+
                     return;
                 }
 
-                bool usuarioValido = await baseDatos.Usuarios
-                    .AnyAsync(usuario =>
-                        usuario.IdUsuario == idUsuario &&
-                        usuario.Activo &&
-                        usuario.VersionToken == versionToken);
+                var baseDatos =
+                    contexto.HttpContext.RequestServices
+                        .GetRequiredService<ContextoBaseDatos>();
 
-                if (!usuarioValido)
+                var usuario = await baseDatos.Usuarios
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(u =>
+                        u.IdUsuario == idUsuario
+                    );
+
+                if (usuario == null ||
+                    !usuario.Activo ||
+                    usuario.VersionToken != versionToken)
                 {
-                    contexto.Fail("El usuario está inactivo o el token fue revocado.");
+                    contexto.Fail(
+                        "El usuario está inactivo o el token fue revocado."
+                    );
+
+                    return;
+                }
+
+                bool esRutaCambioClave =
+                    contexto.HttpContext.Request.Path
+                        .Equals(
+                            "/api/autenticacion/cambiar-clave",
+                            StringComparison.OrdinalIgnoreCase
+                        );
+
+                if (usuario.DebeCambiarClave &&
+                    !esRutaCambioClave)
+                {
+                    contexto.Fail(
+                        "Debe cambiar su contraseña antes de continuar."
+                    );
+
                     return;
                 }
             }
@@ -135,9 +166,9 @@ constructor.Services.AddCors(opciones =>
     opciones.AddPolicy("PoliticaReact", politica =>
     {
         politica
-        .WithOrigins("http://localhost:5173")
-        .AllowAnyHeader()
-        .AllowAnyMethod();
+            .WithOrigins("http://localhost:5173")
+            .AllowAnyHeader()
+            .AllowAnyMethod();
     });
 });
 
@@ -155,4 +186,5 @@ aplicacion.UseRateLimiter();
 aplicacion.UseAuthentication();
 aplicacion.UseAuthorization();
 aplicacion.MapControllers();
+
 aplicacion.Run();

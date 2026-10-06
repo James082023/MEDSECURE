@@ -4,6 +4,7 @@ namespace MedSecure.DTO
 {
     public class SolicitudRegistroConsultaMedica
     {
+        [Range(1, int.MaxValue)]
         public int IdExpediente { get; set; }
 
         [MaxLength(500)]

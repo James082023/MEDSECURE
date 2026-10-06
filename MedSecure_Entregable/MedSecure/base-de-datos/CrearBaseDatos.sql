@@ -10,6 +10,10 @@ CREATE TABLE Roles
 );
 GO
 
+CREATE UNIQUE INDEX UX_Roles_Nombre
+ON Roles(Nombre);
+GO
+
 CREATE TABLE Usuarios
 (
     IdUsuario INT IDENTITY(1,1) PRIMARY KEY,
@@ -17,6 +21,8 @@ CREATE TABLE Usuarios
     Correo NVARCHAR(150) NOT NULL UNIQUE,
     ClaveHash NVARCHAR(500) NOT NULL,
     Activo BIT NOT NULL DEFAULT 1,
+    DebeCambiarClave BIT NOT NULL DEFAULT 0,
+    VersionToken INT NOT NULL DEFAULT 1,
     FechaCreacion DATETIME2 NOT NULL DEFAULT GETDATE()
 );
 GO
@@ -42,37 +48,29 @@ GO
 CREATE TABLE Pacientes
 (
     IdPaciente INT IDENTITY(1,1) PRIMARY KEY,
-
     Nombres NVARCHAR(100) NOT NULL,
-
     Apellidos NVARCHAR(100) NOT NULL,
-
     DocumentoIdentidad NVARCHAR(50) NULL,
-
     FechaNacimiento DATE NULL,
-
     Sexo NVARCHAR(20) NULL,
-
     Telefono NVARCHAR(30) NULL,
-
     Correo NVARCHAR(150) NULL,
-
     Direccion NVARCHAR(250) NULL,
-
     FechaRegistro DATETIME2 NOT NULL DEFAULT GETDATE(),
-
     Activo BIT NOT NULL DEFAULT 1
 );
+GO
+
+CREATE UNIQUE INDEX UX_Pacientes_DocumentoIdentidad
+ON Pacientes(DocumentoIdentidad)
+WHERE DocumentoIdentidad IS NOT NULL;
 GO
 
 CREATE TABLE Expedientes
 (
     IdExpediente INT IDENTITY(1,1) PRIMARY KEY,
-
     IdPaciente INT NOT NULL,
-
     FechaCreacion DATETIME2 NOT NULL DEFAULT GETDATE(),
-
     ObservacionesGenerales NVARCHAR(MAX) NULL,
 
     CONSTRAINT FK_Expedientes_Pacientes
@@ -81,26 +79,21 @@ CREATE TABLE Expedientes
 );
 GO
 
+CREATE UNIQUE INDEX UX_Expedientes_IdPaciente
+ON Expedientes(IdPaciente);
+GO
+
 CREATE TABLE ConsultasMedicas
 (
     IdConsulta INT IDENTITY(1,1) PRIMARY KEY,
-
     IdExpediente INT NOT NULL,
-
     IdUsuario INT NULL,
-
     FechaConsulta DATETIME2 NOT NULL DEFAULT GETDATE(),
-
     MotivoConsulta NVARCHAR(500) NULL,
-
     Diagnostico NVARCHAR(MAX) NULL,
-
     Tratamiento NVARCHAR(MAX) NULL,
-
     Medicamentos NVARCHAR(MAX) NULL,
-
     Observaciones NVARCHAR(MAX) NULL,
-
     ResultadosExamenes NVARCHAR(MAX) NULL,
 
     CONSTRAINT FK_Consultas_Expedientes
@@ -116,17 +109,11 @@ GO
 CREATE TABLE Auditoria
 (
     IdAuditoria INT IDENTITY(1,1) PRIMARY KEY,
-
     IdUsuario INT NULL,
-
     Accion NVARCHAR(100) NOT NULL,
-
     Modulo NVARCHAR(100) NULL,
-
     Detalles NVARCHAR(MAX) NULL,
-
     DireccionIP NVARCHAR(50) NULL,
-
     FechaHora DATETIME2 NOT NULL DEFAULT GETDATE(),
 
     CONSTRAINT FK_Auditoria_Usuarios
@@ -151,6 +138,6 @@ VALUES
 ),
 (
     'Recepcion',
-    'Gestión de pacientes y consultas'
+    'Gestión de pacientes'
 );
 GO
