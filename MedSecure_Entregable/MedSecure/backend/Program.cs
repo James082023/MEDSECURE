@@ -48,17 +48,23 @@ constructor.Services.AddRateLimiter(opciones =>
     };
 });
 
-string claveJwt = constructor.Configuration["Jwt:Clave"]
+string claveJwt =
+    constructor.Configuration["Jwt:Clave"]
+    ?? Environment.GetEnvironmentVariable("JWT_CLAVE")
     ?? throw new InvalidOperationException(
-        "No se encontró la configuración Jwt:Clave.");
+        "No se encontró la configuración de la clave JWT.");
 
-string emisorJwt = constructor.Configuration["Jwt:Emisor"]
+string emisorJwt =
+    constructor.Configuration["Jwt:Emisor"]
+    ?? Environment.GetEnvironmentVariable("JWT_EMISOR")
     ?? throw new InvalidOperationException(
-        "No se encontró la configuración Jwt:Emisor.");
+        "No se encontró la configuración del emisor JWT.");
 
-string audienciaJwt = constructor.Configuration["Jwt:Audiencia"]
+string audienciaJwt =
+    constructor.Configuration["Jwt:Audiencia"]
+    ?? Environment.GetEnvironmentVariable("JWT_AUDIENCIA")
     ?? throw new InvalidOperationException(
-        "No se encontró la configuración Jwt:Audiencia.");
+        "No se encontró la configuración de la audiencia JWT.");
 
 constructor.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -153,12 +159,18 @@ constructor.Services
         };
     });
 
-constructor.Services.AddDbContext<ContextoBaseDatos>(opciones =>
-    opciones.UseSqlServer(
-        constructor.Configuration.GetConnectionString(
-            "ConexionMedSecure"
-        )
+string conexionBaseDatos =
+    constructor.Configuration.GetConnectionString(
+        "ConexionMedSecure"
     )
+    ?? Environment.GetEnvironmentVariable(
+        "CONEXION_MEDSECURE"
+    )
+    ?? throw new InvalidOperationException(
+        "No se encontró la conexión a la base de datos.");
+
+constructor.Services.AddDbContext<ContextoBaseDatos>(opciones =>
+    opciones.UseSqlServer(conexionBaseDatos)
 );
 
 constructor.Services.AddCors(opciones =>
@@ -166,7 +178,10 @@ constructor.Services.AddCors(opciones =>
     opciones.AddPolicy("PoliticaReact", politica =>
     {
         politica
-            .WithOrigins("http://localhost:5173")
+            .WithOrigins(
+                "http://localhost:5173",
+                "https://medsecureproyecto.netlify.app"
+            )
             .AllowAnyHeader()
             .AllowAnyMethod();
     });
