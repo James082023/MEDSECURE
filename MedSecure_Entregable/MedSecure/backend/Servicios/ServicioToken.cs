@@ -17,17 +17,23 @@ namespace MedSecure.Servicios
 
         public string GenerarToken(Usuario usuario, IEnumerable<string> roles)
         {
-            string clave = _configuracion["Jwt:Clave"]
+            string clave =
+                _configuracion["Jwt:Clave"]
+                ?? Environment.GetEnvironmentVariable("JWT_CLAVE")
                 ?? throw new InvalidOperationException(
-                    "No se encontró Jwt:Clave.");
+                    "No se encontró la configuración de la clave JWT.");
 
-            string emisor = _configuracion["Jwt:Emisor"]
+            string emisor =
+                _configuracion["Jwt:Emisor"]
+                ?? Environment.GetEnvironmentVariable("JWT_EMISOR")
                 ?? throw new InvalidOperationException(
-                    "No se encontró Jwt:Emisor.");
+                    "No se encontró la configuración del emisor JWT.");
 
-            string audiencia = _configuracion["Jwt:Audiencia"]
+            string audiencia =
+                _configuracion["Jwt:Audiencia"]
+                ?? Environment.GetEnvironmentVariable("JWT_AUDIENCIA")
                 ?? throw new InvalidOperationException(
-                    "No se encontró Jwt:Audiencia.");
+                    "No se encontró la configuración de la audiencia JWT.");
 
             var claims = new List<Claim>
             {
@@ -43,7 +49,6 @@ namespace MedSecure.Servicios
                     ClaimTypes.Email,
                     usuario.Correo
                 ),
-
                 new Claim(
                     "VersionToken",
                     usuario.VersionToken.ToString()
