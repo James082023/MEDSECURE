@@ -1,7 +1,7 @@
 import axios from "axios";
 
 const api = axios.create({
-    baseURL: "https://localhost:7159/api",
+    baseURL: import.meta.env.VITE_API_URL || "https://localhost:7159/api",
     headers: {
         "Content-Type": "application/json"
     }
@@ -14,6 +14,7 @@ export const configurarToken = (token) => {
         delete api.defaults.headers.common.Authorization
     }
 }
+
 let manejadorNoAutorizado = null
 
 export const configurarManejadorNoAutorizado = (manejador) => {
